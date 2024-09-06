@@ -53,70 +53,113 @@
 #' levelplot(mess$mod, col.regions=brewer.pal(8, 'Set1'))
 #' levelplot(mess$mos, col.regions=brewer.pal(8, 'Set1'))
 #' }
-similarity <- function(x, ref, full=FALSE) {
-  if(!methods::is(ref, 'data.frame')) {
+similarity <- function (x, ref, full = FALSE) 
+{
+  if (!methods::is(ref, "data.frame")) {
     ref <- as.data.frame(ref)
   }
-  if(is(x, 'Raster')) {
+  if (is(x, "Raster")) {
     r <- TRUE
-    if(isTRUE(full)) {
-      out <- raster::stack(replicate(
-        raster::nlayers(x), raster::init(x, function(x) NA)))
-    } else {
+    if (isTRUE(full)) {
+      out <- raster::stack(replicate(raster::nlayers(x), 
+                                     raster::init(x, function(x) NA)))
+    }
+    else {
       out <- raster::init(x, function(x) NA)
     }
-  } else r <- FALSE
+  }
+  else r <- FALSE
   ref <- stats::na.omit(ref)
-  if(!methods::is(x, 'data.frame')) {
-    x <- as.data.frame(x)
+  
+  if (!methods::is(x, "data.frame")) {
+    factor_bool <- is.factor(x)
+    x <- as.data.frame(values(x))
+    x[,factor_bool] <- as.factor(x[,factor_bool])
   }
-  if(is.null(dim(ref))) {
-    rng <- as.data.frame(range(ref, na.rm=TRUE))
-  } else {
-    rng <- as.data.frame(apply(ref, 2, range, na.rm=TRUE))
-  }
-  pct_less <- mapply(function(x, ref) {
-    findInterval(x, sort(ref))/length(ref)
-  }, x, ref, SIMPLIFY=FALSE)
-  sim <- mapply(function(f, rng, p) {
-    ifelse(f==0, (p-rng[1])/diff(rng)*100,
-           ifelse(f > 0 & f <= 0.5, f*200,
-                  ifelse(f > 0.5 & f < 1, (1-f)*200,
-                         (rng[2]-p)/diff(rng)*100)))
-  }, pct_less, rng, x)
   
-  min_sim <- if(is.matrix(sim)) apply(sim, 1, min) else(min(sim))
+  new_order <- sapply(colnames(ref), function(name){which(name == colnames(x))})
+  x <- x[,new_order]
+  fact <- t(matrix(sapply(ref,is.factor)))
   
-  mins <- apply(sim, 1, which.min)
-  most_dissimilar_vec <- unlist(ifelse(lengths(mins)==0, NA, mins))
-  maxs <- apply(sim, 1, which.max)
-  most_similar_vec <- unlist(ifelse(lengths(maxs)==0, NA, maxs))
-  
-  if(isTRUE(r)) {
+  if(any(!fact)){
+    ref_numerical <- as.data.frame(ref[,!fact])
+    colnames(ref_numerical) <- colnames(ref)[!fact]
+    x_numerical <- as.data.frame(x[,!fact])
+    colnames(x_numerical) <- colnames(x)[!fact]
     
+    if (is.null(dim(ref_numerical))) {
+      rng <- as.data.frame(range(ref_numerical, na.rm = TRUE))
+    }
+    else {
+      rng <- as.data.frame(apply(ref_numerical, 2, range, na.rm = TRUE))
+    }
+    pct_less <- mapply(function(x, ref) {
+      findInterval(x, sort(ref))/length(ref)
+    }, x_numerical, ref_numerical, SIMPLIFY = FALSE)
+    sim_numerical <- mapply(function(f, rng, p) {
+      ifelse(f == 0, (p - rng[1])/diff(rng) * 100, 
+             ifelse(f > 0 & f <= 0.5, f * 200, 
+                    ifelse(f > 0.5 & f < 1, (1 - f) * 200, (rng[2] - p)/diff(rng) * 100)))
+    }, pct_less, rng, x_numerical)
+  }
+  
+  if(any(fact)){
+    ref_categorical <- as.data.frame(as.character(ref[,fact]))
+    colnames(ref_categorical) <- colnames(ref)[fact]
+    x_categorical <- as.data.frame(as.character(x[,fact]))
+    colnames(x_categorical) <- colnames(x)[fact]
+    
+    sim_categorical <- x_categorical
+    for(i in 1:ncol(x_categorical)){
+      temp_ref <- ref_categorical[,i]
+      temp_x <- x_categorical[,i]
+      temp_table <- table(temp_ref)
+      sim_categorical[,i] <- sapply(temp_x, function(val){
+        ifelse(is.na(val), NA, temp_table[val])})
+      sim_categorical[,i] <- sim_categorical[,i]/length(temp_ref)
+    }
+    sim_categorical <- as.matrix(sim_categorical)
+    sim_categorical[!is.na(sim_categorical) & sim_categorical == 0] <- -Inf
+  }
+  
+  if(all(!fact)) sim <- sim_numerical
+  else if(all(fact)) sim <- sim_categorical
+  else sim <- cbind(sim_numerical, sim_categorical)
+  
+  min_sim <- if (is.matrix(sim)) 
+    apply(sim, 1, min)
+  else (min(sim))
+  mins <- apply(sim, 1, which.min)
+  most_dissimilar_vec <- unlist(ifelse(lengths(mins) == 0, NA, mins))
+  maxs <- apply(sim, 1, which.max)
+  most_similar_vec <- unlist(ifelse(lengths(maxs) == 0, NA, maxs))
+  if (isTRUE(r)) {
     most_dissimilar <- raster::raster(out)
     most_dissimilar[] <- most_dissimilar_vec
     most_dissimilar <- as.factor(most_dissimilar)
-    levels(most_dissimilar)[[1]] <- data.frame(ID=seq_len(ncol(sim)), 
-                                               var=colnames(sim))
+    levels(most_dissimilar)[[1]] <- data.frame(ID = seq_len(ncol(sim)), 
+                                               var = colnames(sim))
     most_similar <- raster::raster(out)
     most_similar[] <- most_similar_vec
     most_similar <- as.factor(most_similar)
-    levels(most_similar)[[1]] <- data.frame(ID=seq_len(ncol(sim)), 
-                                            var=colnames(sim))  
-    
+    levels(most_similar)[[1]] <- data.frame(ID = seq_len(ncol(sim)), 
+                                            var = colnames(sim))
     out_min <- raster::raster(out)
     out_min[] <- min_sim
-    if(isTRUE(full)) {
+    if (isTRUE(full)) {
       out[] <- sim
-      list(similarity=out, similarity_min=out_min, mod=most_dissimilar, 
-           mos=most_similar)
-    } else list(similarity_min=out_min, mod=most_dissimilar, mos=most_similar)
-  } else {
-    if(isTRUE(full)) {
-      list(similarity=sim, similarity_min=min_sim, 
-           mod=most_dissimilar_vec, mos=most_similar_vec)
-    } else list(similarity_min=min_sim, mod=most_dissimilar_vec, 
-                mos=most_similar_vec)
+      list(similarity = out, similarity_min = out_min, 
+           mod = most_dissimilar, mos = most_similar)
+    }
+    else list(similarity_min = out_min, mod = most_dissimilar, 
+              mos = most_similar)
+  }
+  else {
+    if (isTRUE(full)) {
+      list(similarity = sim, similarity_min = min_sim, 
+           mod = most_dissimilar_vec, mos = most_similar_vec)
+    }
+    else list(similarity_min = min_sim, mod = most_dissimilar_vec, 
+              mos = most_similar_vec)
   }
 }
