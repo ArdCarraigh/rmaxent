@@ -5,10 +5,7 @@ Description: An R implementation of tasks related to 'Maxent' species
     distribution modelling: projecting models; computing information criteria;
     creating limiting factors maps; importing mxe files; recreating MaxEnt class
     objects and parsing .lambdas files.
-<<<<<<< HEAD
-=======
-Version: 0.9.0.9000
->>>>>>> upstream/master
+Version: 0.9.1.9000
 Depends:
     R (>= 4.0.3)
 Imports:
