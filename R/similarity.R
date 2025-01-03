@@ -116,7 +116,7 @@ similarity <- function (x, ref, full = FALSE)
       temp_table <- table(temp_ref)
       sim_categorical[,i] <- sapply(temp_x, function(val){
         ifelse(is.na(val), NA, temp_table[val])})
-      sim_categorical[,i] <- sim_categorical[,i]/length(temp_ref)
+      sim_categorical[,i] <- sim_categorical[,i]/length(temp_ref) * 100
     }
     sim_categorical <- as.matrix(sim_categorical)
     sim_categorical[!is.na(sim_categorical) & sim_categorical == 0] <- -Inf
