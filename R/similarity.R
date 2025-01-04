@@ -72,14 +72,13 @@ similarity <- function (x, ref, full = FALSE)
   ref <- stats::na.omit(ref)
   
   if (!methods::is(x, "data.frame")) {
-    factor_bool <- is.factor(x)
-    x <- as.data.frame(values(x))
+    factor_bool <- raster::is.factor(x)
+    x <- as.data.frame(raster::values(x))
     x[,factor_bool] <- as.factor(x[,factor_bool])
   }
   
-  new_order <- sapply(colnames(ref), function(name){which(name == colnames(x))})
-  x <- x[,new_order]
-  fact <- t(matrix(sapply(ref,is.factor)))
+  x <- x[,pmatch(colnames(ref), names(x))]
+  fact <- c(t(matrix(sapply(ref,is.factor))))
   
   if(any(!fact)){
     ref_numerical <- as.data.frame(ref[,!fact])
