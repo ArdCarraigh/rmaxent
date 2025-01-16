@@ -74,7 +74,7 @@ similarity <- function (x, ref, full = FALSE)
   if (!methods::is(x, "data.frame")) {
     factor_bool <- raster::is.factor(x)
     x <- as.data.frame(raster::values(x))
-    x[,factor_bool] <- as.factor(x[,factor_bool])
+    if(any(factor_bool)) x[,factor_bool] <- as.factor(x[,factor_bool])
   }
   
   x <- x[,pmatch(colnames(ref), names(x))]
