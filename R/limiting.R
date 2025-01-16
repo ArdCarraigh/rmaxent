@@ -30,24 +30,50 @@
 #'   me <- maxent(predictors, occ, factors='biome')
 #'   limiting(predictors, me)
 #' }
-limiting <- function(x, me) {
+limiting <- function(x, me, filename='', ...) {
+  out <- raster(x)
+  filename <- trim(filename)
   lam <- parse_lambdas(me)$lambdas
-  categ <- lam$type[match(names(me@presence), lam$var)]=='categorical'
+  nms <- names(me@presence)
+  categ <- lam$type[match(nms, lam$var)]=='categorical'
   best <- rep(NA_real_, ncol(me@presence))
   best[!categ] <- colMeans(me@presence[!categ])
   best[categ] <- sapply(me@presence[categ], function(x) {
     as.numeric(names(which.max(table(x))), levels=levels(x))
-  })  
-  L <- lapply(seq_along(names(me@presence)), function(i) {
-    p <- x[[names(me@presence)]]
-    p[[i]][] <- best[[i]]
-    project(me, p, quiet=TRUE)$prediction_logistic
   })
-  pred <- project(me, x, quiet=TRUE)$prediction_logistic
-  limiting <- raster::which.max(raster::stack(L)- pred)
-  limiting <- raster::as.factor(limiting)
-  lev <- raster::levels(limiting)[[1]]
-  lev$predictor <- names(me@presence)[lev$ID]
-  levels(limiting) <- lev
-  limiting
+  
+  .lim <- function(x, me, nms){
+    L <- lapply(seq_along(nms), function(i) {
+      p <- x[,nms]
+      p[,i] <- best[[i]]
+      project(me, p, quiet=TRUE)$prediction_logistic
+    })
+    pred <- project(me, x, quiet=TRUE)$prediction_logistic
+    limiting <- max.col(as.data.frame(L) - pred, "first")
+    limiting
+  }
+  
+  if(filename == ''){
+    vv <- getValues(x)
+    vv <- .lim(vv, me, nms)
+    out <- setValues(out, vv)
+  }
+  else{
+    tr <- blockSize(out)
+    pb <- pbCreate(tr$n, ...)	
+    out <- writeStart(out, filename, ...)
+    for (i in 1:tr$n) {
+      vv <- getValues(x, row=tr$row[i], nrows=tr$nrows[i])
+      vv <- .lim(vv, me, nms)
+      out <- writeValues(out, vv, tr$row[i])
+      pbStep(pb) 
+    }
+    out <- writeStop(out)
+    pbClose(pb) 
+  }
+  out <- as.factor(out)
+  lev <- raster::levels(out)[[1]]
+  lev$predictor <- nms[lev$ID]
+  levels(out) <- lev
+  out
 }
