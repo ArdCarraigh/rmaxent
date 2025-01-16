@@ -53,20 +53,17 @@
 #' levelplot(mess$mod, col.regions=brewer.pal(8, 'Set1'))
 #' levelplot(mess$mos, col.regions=brewer.pal(8, 'Set1'))
 #' }
-similarity <- function (x, ref, full = FALSE) 
+similarity <- function (x, ref, full = FALSE, filename='', ...) 
 {
   if (!methods::is(ref, "data.frame")) {
     ref <- as.data.frame(ref)
   }
   if (is(x, "Raster")) {
     r <- TRUE
-    if (isTRUE(full)) {
-      out <- raster::stack(replicate(raster::nlayers(x), 
-                                     raster::init(x, function(x) NA)))
-    }
-    else {
-      out <- raster::init(x, function(x) NA)
-    }
+    out <- raster(x)
+    nl <- nlayers(x)
+    filename <- trim(filename)
+    nms <- names(x)
   }
   else r <- FALSE
   ref <- stats::na.omit(ref)
@@ -80,85 +77,96 @@ similarity <- function (x, ref, full = FALSE)
   x <- x[,pmatch(colnames(ref), names(x))]
   fact <- c(t(matrix(sapply(ref,is.factor))))
   
-  if(any(!fact)){
-    ref_numerical <- as.data.frame(ref[,!fact])
-    colnames(ref_numerical) <- colnames(ref)[!fact]
-    x_numerical <- as.data.frame(x[,!fact])
-    colnames(x_numerical) <- colnames(x)[!fact]
+  ref_numerical <- as.data.frame(ref[,!fact])
+  colnames(ref_numerical) <- colnames(ref)[!fact]
+  rng <- as.data.frame(apply(ref_numerical, 2, range, na.rm = TRUE))
+  ref_categorical <- as.data.frame(as.character(ref[,fact]))
+  colnames(ref_categorical) <- colnames(ref)[fact]
+  
+  .mess <- function(x, ref_numerical, rng, ref_categorical, fact){
+    if(any(!fact)){
+      x_numerical <- as.data.frame(x[,!fact])
+      colnames(x_numerical) <- colnames(x)[!fact]
+      pct_less <- mapply(function(x, ref) {
+        findInterval(x, sort(ref))/length(ref)
+      }, x_numerical, ref_numerical, SIMPLIFY = FALSE)
+      sim_numerical <- mapply(function(f, rng, p) {
+        ifelse(f == 0, (p - rng[1])/diff(rng) * 100, 
+               ifelse(f > 0 & f <= 0.5, f * 200, 
+                      ifelse(f > 0.5 & f < 1, (1 - f) * 200, (rng[2] - p)/diff(rng) * 100)))
+      }, pct_less, rng, x_numerical)
+    }
     
-    if (is.null(dim(ref_numerical))) {
-      rng <- as.data.frame(range(ref_numerical, na.rm = TRUE))
+    if(any(fact)){
+      x_categorical <- as.data.frame(as.character(x[,fact]))
+      colnames(x_categorical) <- colnames(x)[fact]
+      sim_categorical <- x_categorical
+      for(i in 1:ncol(x_categorical)){
+        temp_ref <- ref_categorical[,i]
+        temp_x <- x_categorical[,i]
+        temp_table <- table(temp_ref)
+        sim_categorical[,i] <- sapply(temp_x, function(val){
+          ifelse(is.na(val), NA, ifelse(val %in% names(temp_table), temp_table[val], -Inf))})
+        sim_categorical[,i] <- sim_categorical[,i]/length(temp_ref) * 100
+      }
+      sim_categorical <- as.matrix(sim_categorical)
     }
-    else {
-      rng <- as.data.frame(apply(ref_numerical, 2, range, na.rm = TRUE))
-    }
-    pct_less <- mapply(function(x, ref) {
-      findInterval(x, sort(ref))/length(ref)
-    }, x_numerical, ref_numerical, SIMPLIFY = FALSE)
-    sim_numerical <- mapply(function(f, rng, p) {
-      ifelse(f == 0, (p - rng[1])/diff(rng) * 100, 
-             ifelse(f > 0 & f <= 0.5, f * 200, 
-                    ifelse(f > 0.5 & f < 1, (1 - f) * 200, (rng[2] - p)/diff(rng) * 100)))
-    }, pct_less, rng, x_numerical)
+    
+    if(all(!fact)) sim <- as.data.frame(sim_numerical)
+    else if(all(fact)) sim <- as.data.frame(sim_categorical)
+    else sim <- cbind(sim_numerical, sim_categorical)
+    sim[!is.na(sim) & sim == -Inf]  <- min(sim[!is.na(sim) & sim != -Inf]) - 1
+    min_sim <- apply(sim, 1, min)
+    mins <- apply(sim, 1, which.min)
+    most_dissimilar_vec <- unlist(ifelse(lengths(mins) == 0, NA, mins))
+    maxs <- apply(sim, 1, which.max)
+    most_similar_vec <- unlist(ifelse(lengths(maxs) == 0, NA, maxs))
+    list(similarity = sim, similarity_min = min_sim, 
+         mod = most_dissimilar_vec, mos = most_similar_vec)
   }
   
-  if(any(fact)){
-    ref_categorical <- as.data.frame(as.character(ref[,fact]))
-    colnames(ref_categorical) <- colnames(ref)[fact]
-    x_categorical <- as.data.frame(as.character(x[,fact]))
-    colnames(x_categorical) <- colnames(x)[fact]
-    
-    sim_categorical <- x_categorical
-    for(i in 1:ncol(x_categorical)){
-      temp_ref <- ref_categorical[,i]
-      temp_x <- x_categorical[,i]
-      temp_table <- table(temp_ref)
-      sim_categorical[,i] <- sapply(temp_x, function(val){
-        ifelse(is.na(val), NA, temp_table[val])})
-      sim_categorical[,i] <- sim_categorical[,i]/length(temp_ref) * 100
-    }
-    sim_categorical <- as.matrix(sim_categorical)
-    sim_categorical[!is.na(sim_categorical) & sim_categorical == 0] <- -Inf
-  }
-  
-  if(all(!fact)) sim <- sim_numerical
-  else if(all(fact)) sim <- sim_categorical
-  else sim <- cbind(sim_numerical, sim_categorical)
-  
-  min_sim <- if (is.matrix(sim)) 
-    apply(sim, 1, min)
-  else (min(sim))
-  mins <- apply(sim, 1, which.min)
-  most_dissimilar_vec <- unlist(ifelse(lengths(mins) == 0, NA, mins))
-  maxs <- apply(sim, 1, which.max)
-  most_similar_vec <- unlist(ifelse(lengths(maxs) == 0, NA, maxs))
   if (isTRUE(r)) {
-    most_dissimilar <- raster::raster(out)
-    most_dissimilar[] <- most_dissimilar_vec
-    most_dissimilar <- as.factor(most_dissimilar)
-    levels(most_dissimilar)[[1]] <- data.frame(ID = seq_len(ncol(sim)), 
-                                               var = colnames(sim))
-    most_similar <- raster::raster(out)
-    most_similar[] <- most_similar_vec
-    most_similar <- as.factor(most_similar)
-    levels(most_similar)[[1]] <- data.frame(ID = seq_len(ncol(sim)), 
-                                            var = colnames(sim))
-    out_min <- raster::raster(out)
-    out_min[] <- min_sim
+    out <- brick(out, nl=nl+3)
+    if(filename == ''){
+      vv <- .mess(x, ref_numerical, rng, ref_categorical, fact)
+      out <- setValues(out, as.matrix(cbind(vv$similarity, vv$similarity_min, unname(vv$mod), unname(vv$mos))))
+    }
+    else{
+      tr <- blockSize(out)
+      pb <- pbCreate(tr$n, ...)	
+      out <- writeStart(out, filename, ...)
+      for (i in 1:tr$n) {
+        start <- ncol(out) * (tr$row[i]-1) + 1
+        end <- start + (ncol(out) * tr$nrows[i]-1)
+        vv <- x[start:end,]
+        vv <- .mess(vv, ref_numerical, rng, ref_categorical, fact)
+        out <- writeValues(out, as.matrix(cbind(vv$similarity, vv$similarity_min, unname(vv$mod), unname(vv$mos))), tr$row[i])
+        pbStep(pb) 
+      }
+      out <- writeStop(out)
+      pbClose(pb)
+    }
+    names(out) <- c(nms, "similarity_min", "mod", "mos")
+    most_dissimilar <- as.factor(out[['mod']])
+    levels(most_dissimilar)[[1]] <- data.frame(ID = seq_len(nl), var = nms)
+    most_similar <- as.factor(out[['mos']])
+    levels(most_similar)[[1]] <- data.frame(ID = seq_len(nl), var = nms)
+    out_min <- out[['similarity_min']]
+    out <- out[[nms]]
+    
     if (isTRUE(full)) {
-      out[] <- sim
-      list(similarity = out, similarity_min = out_min, 
+      out <- list(similarity = out, similarity_min = out_min, 
            mod = most_dissimilar, mos = most_similar)
     }
-    else list(similarity_min = out_min, mod = most_dissimilar, 
+    else out <- list(similarity_min = out_min, mod = most_dissimilar, 
               mos = most_similar)
   }
+  
   else {
-    if (isTRUE(full)) {
-      list(similarity = sim, similarity_min = min_sim, 
-           mod = most_dissimilar_vec, mos = most_similar_vec)
+    out <- .mess(x, ref_numerical, rng, ref_categorical, fact)
+    if (!isTRUE(full)) {
+      out <- out[c('similarity_min', 'mod', 'mos')]
     }
-    else list(similarity_min = min_sim, mod = most_dissimilar_vec, 
-              mos = most_similar_vec)
   }
+  out
 }
