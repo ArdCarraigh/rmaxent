@@ -58,35 +58,36 @@ similarity <- function (x, ref, full = FALSE, filename='', ...)
   if (!methods::is(ref, "data.frame")) {
     ref <- as.data.frame(ref)
   }
-  if (is(x, "Raster")) {
-    r <- TRUE
-    out <- raster(x)
-    nl <- nlayers(x)
-    filename <- trim(filename)
-    nms <- names(x)
-  }
-  else r <- FALSE
   ref <- stats::na.omit(ref)
   
-  if (!methods::is(x, "data.frame")) {
-    factor_bool <- raster::is.factor(x)
+  if (methods::is(x, "Raster")) {
+    r <- TRUE
+    out <- raster(x)
+    filename <- trim(filename)
+    nms <- names(x)
     x <- as.data.frame(raster::values(x))
-    if(any(factor_bool)) x[,factor_bool] <- as.factor(x[,factor_bool])
+    colnames(x) <- nms
+  }
+  else r <- FALSE
+  
+  if (!methods::is(x, "data.frame")) {
+    x <- as.data.frame(x)
   }
   
-  x <- x[,pmatch(colnames(ref), names(x))]
+  x <- x[colnames(x) %in% colnames(ref)]
+  ref <- ref[colnames(ref) %in% colnames(x)]
+  ref <- ref[colnames(x)]
   fact <- c(t(matrix(sapply(ref,is.factor))))
+  nms <- colnames(x)
+  nl <- ncol(x)
   
-  ref_numerical <- as.data.frame(ref[,!fact])
-  colnames(ref_numerical) <- colnames(ref)[!fact]
+  ref_numerical <- as.data.frame(ref[!fact])
   rng <- as.data.frame(apply(ref_numerical, 2, range, na.rm = TRUE))
-  ref_categorical <- as.data.frame(as.character(ref[,fact]))
-  colnames(ref_categorical) <- colnames(ref)[fact]
+  ref_categorical <- as.data.frame(ref[fact])
   
   .mess <- function(x, ref_numerical, rng, ref_categorical, fact){
     if(any(!fact)){
-      x_numerical <- as.data.frame(x[,!fact])
-      colnames(x_numerical) <- colnames(x)[!fact]
+      x_numerical <- as.data.frame(x[!fact])
       pct_less <- mapply(function(x, ref) {
         findInterval(x, sort(ref))/length(ref)
       }, x_numerical, ref_numerical, SIMPLIFY = FALSE)
@@ -98,8 +99,7 @@ similarity <- function (x, ref, full = FALSE, filename='', ...)
     }
     
     if(any(fact)){
-      x_categorical <- as.data.frame(as.character(x[,fact]))
-      colnames(x_categorical) <- colnames(x)[fact]
+      x_categorical <- as.data.frame(x[fact])
       sim_categorical <- x_categorical
       for(i in 1:ncol(x_categorical)){
         temp_ref <- ref_categorical[,i]
@@ -114,8 +114,9 @@ similarity <- function (x, ref, full = FALSE, filename='', ...)
     
     if(all(!fact)) sim <- as.data.frame(sim_numerical)
     else if(all(fact)) sim <- as.data.frame(sim_categorical)
-    else sim <- cbind(sim_numerical, sim_categorical)
-    sim[!is.na(sim) & sim == -Inf]  <- min(sim[!is.na(sim) & sim != -Inf]) - 1
+    else sim <- as.data.frame(cbind(sim_numerical, sim_categorical))
+    sim <- sim[colnames(ref)]
+    sim[!is.na(sim) & sim == -Inf]  <- min(0, min(sim[!is.na(sim) & sim != -Inf]) - 1)
     min_sim <- apply(sim, 1, min)
     mins <- apply(sim, 1, which.min)
     most_dissimilar_vec <- unlist(ifelse(lengths(mins) == 0, NA, mins))
@@ -156,10 +157,10 @@ similarity <- function (x, ref, full = FALSE, filename='', ...)
     
     if (isTRUE(full)) {
       out <- list(similarity = out, similarity_min = out_min, 
-           mod = most_dissimilar, mos = most_similar)
+                  mod = most_dissimilar, mos = most_similar)
     }
     else out <- list(similarity_min = out_min, mod = most_dissimilar, 
-              mos = most_similar)
+                     mos = most_similar)
   }
   
   else {
