@@ -74,7 +74,7 @@
 #' all.equal(values(pred$prediction_logistic), values(pred2))
 #' all.equal(values(pred$prediction_cloglog), values(pred3))
 #' }
-project <- function(lambdas, newdata, return_lfx=FALSE, mask, quiet=FALSE) {
+project <- function(lambdas, newdata, return_lfx=FALSE, mask, quiet=FALSE, filename= '', output_format = c("raw", "logistic", "cloglog"), ...) {
   if(!missing(mask)) {
     if(!methods::is(mask, 'RasterLayer')) {
       stop('mask should be a RasterLayer object')
@@ -136,76 +136,112 @@ project <- function(lambdas, newdata, return_lfx=FALSE, mask, quiet=FALSE) {
   k_hinge <- if('hinge' %in% names(lambdas)) nrow(lambdas$hinge) else 0
   k_other <- if('other' %in% names(lambdas)) nrow(lambdas$other) else 0
   k <- k_hinge + k_other
-
+  
   txt <- sprintf('\rCalculating contribution of feature %%%1$dd of %%%1$dd', 
                  nchar(k))
-  lfx <- numeric(nrow(newdata))
-  lfx_all <- setNames(vector('list', sum(sapply(lambdas, nrow))),
-                      unlist(lapply(lambdas[2:1], function(x) x$feature)))
   
-  if(k_other > 0) {
-    for (i in seq_len(k_other)) {
-      if(!quiet) cat(sprintf(txt, i, k))
-      x <- with(newdata, eval(parse(text=lambdas$other$feature[i])))
-      # clamp feature
-      x <- pmin(pmax(x, lambdas$other$min[i]), lambdas$other$max[i])
-      x01 <- (x - lambdas$other$min[i]) / 
-        (lambdas$other$max[i] - lambdas$other$min[i])
-      lfx_all[[i]] <- lambdas$other$lambda[i] * x01
-      lfx <- lfx + lfx_all[[i]]
-    }
-    rm(x, x01)
-  }
   
-  if(k_hinge > 0) {
-    for (i in seq_len(nrow(lambdas$hinge))) {
-      if(!quiet) cat(sprintf(txt, k_other + i, k))
-      x <- with(newdata, get(sub("'|`", "", lambdas$hinge$feature[i])))
-      x01 <- (x - lambdas$hinge$min[i]) / (lambdas$hinge$max[i] - lambdas$hinge$min[i])
-      if (lambdas$hinge$type[i]=='reverse_hinge') {
-        lfx_all[[k_other + i]] <- 
-          lambdas$hinge$lambda[i] * (x < lambdas$hinge$max[i]) * (1-x01)
-      } else {
-        lfx_all[[k_other + i]] <- 
-          lambdas$hinge$lambda[i] * (x >= lambdas$hinge$min[i]) * x01
+  .proj <- function(lambdas, newdata, k_other, k_hinge, k, txt, quiet){
+    lfx <- numeric(nrow(newdata))
+    lfx_all <- setNames(vector('list', sum(sapply(lambdas, nrow))),
+                        unlist(lapply(lambdas[2:1], function(x) x$feature)))
+    
+    if(k_other > 0) {
+      for (i in seq_len(k_other)) {
+        if(!quiet) cat(sprintf(txt, i, k))
+        x <- with(newdata, eval(parse(text=lambdas$other$feature[i])))
+        # clamp feature
+        x <- pmin(pmax(x, lambdas$other$min[i]), lambdas$other$max[i])
+        x01 <- (x - lambdas$other$min[i]) / 
+          (lambdas$other$max[i] - lambdas$other$min[i])
+        lfx_all[[i]] <- lambdas$other$lambda[i] * x01
+        lfx <- lfx + lfx_all[[i]]
       }
-      lfx <- lfx + lfx_all[[k_other + i]]
+      rm(x, x01)
     }
-    rm(x, x01)
+    
+    if(k_hinge > 0) {
+      for (i in seq_len(nrow(lambdas$hinge))) {
+        if(!quiet) cat(sprintf(txt, k_other + i, k))
+        x <- with(newdata, get(sub("'|`", "", lambdas$hinge$feature[i])))
+        x01 <- (x - lambdas$hinge$min[i]) / (lambdas$hinge$max[i] - lambdas$hinge$min[i])
+        if (lambdas$hinge$type[i]=='reverse_hinge') {
+          lfx_all[[k_other + i]] <- 
+            lambdas$hinge$lambda[i] * (x < lambdas$hinge$max[i]) * (1-x01)
+        } else {
+          lfx_all[[k_other + i]] <- 
+            lambdas$hinge$lambda[i] * (x >= lambdas$hinge$min[i]) * x01
+        }
+        lfx <- lfx + lfx_all[[k_other + i]]
+      }
+      rm(x, x01)
+    }
+    
+    ln_raw <- lfx - meta$linearPredictorNormalizer - log(meta$densityNormalizer)
+    raw <- exp(ln_raw)
+    logit <- meta$entropy + ln_raw
+    cloglog <- 1 - exp(-exp(meta$entropy) * raw)
+    logistic <- stats::plogis(logit)
+    #linpred <- rep(NA_real_, length(na))
+    #linpred[!na] <- lfx
+    list(raw = raw, logistic = logistic, cloglog = cloglog, lfx = lfx, lfx_all = lfx_all)
   }
   
-  ln_raw <- lfx - meta$linearPredictorNormalizer - log(meta$densityNormalizer)
-  raw <- exp(ln_raw)
-  logit <- meta$entropy + ln_raw
-  cloglog <- 1 - exp(-exp(meta$entropy) * raw)
-  logistic <- stats::plogis(logit)
-  
-  #linpred <- rep(NA_real_, length(na))
-  #linpred[!na] <- lfx
   if(exists('pred_raw', inherits=FALSE)) {
-    pred_raw[which(!na)] <- raw
-    pred_logistic[which(!na)] <- logistic
-    pred_cloglog[which(!na)] <- cloglog
-    pred_lfx[which(!na)] <- lfx
-    out <- list(prediction_raw=pred_raw,
-                prediction_logistic=pred_logistic,
-                prediction_cloglog=pred_cloglog)
-    if(isTRUE(return_lfx)) {
-      lfx_each <- lapply(lfx_all, function(x) {
-        r <- raster(pred_raw)
-        r[which(!na)] <- x
-        r
-      })
-      out <- c(out, 
-               list(prediction_lfx=pred_lfx,
-                    lfx_all=lfx_each))
-    } 
+    if(filename == ''){
+      vv <- .proj(lambdas, newdata, k_other, k_hinge, k, txt, quiet)
+      pred_raw[which(!na)] <- vv$raw
+      pred_logistic[which(!na)] <- vv$logistic
+      pred_cloglog[which(!na)] <- vv$cloglog
+      pred_lfx[which(!na)] <- vv$lfx
+      out <- list(prediction_raw=pred_raw,
+                  prediction_logistic=pred_logistic,
+                  prediction_cloglog=pred_cloglog)
+      if(isTRUE(return_lfx)) {
+        lfx_each <- lapply(vv$lfx_all, function(x) {
+          r <- raster(pred_raw)
+          r[which(!na)] <- x
+          r
+        })
+        out <- c(out, 
+                 list(prediction_lfx=pred_lfx,
+                      lfx_all=lfx_each))
+      } 
+    }
+    else{
+      out <- brick(pred_raw, nl=length(output_format))
+      tr <- blockSize(out)
+      pb <- pbCreate(tr$n, ...)
+      out <- writeStart(out, filename, ...)
+      start2 = 1
+      for (i in 1:tr$n) {
+        start <- ncol(out) * (tr$row[i]-1) + 1
+        end <- start + (ncol(out) * tr$nrows[i]-1)
+        temp_na <- na[start:end]
+        raw <- logistic <- cloglog <- rep(NA_real_, length(temp_na))
+        if(any(!temp_na)){
+          end2 <- start2 + length(temp_na[!temp_na]) - 1 
+          nd <- newdata[start2:end2,]
+          start2 <- end2 + 1
+          vv <- .proj(lambdas, nd, k_other, k_hinge, k, txt, quiet)
+          raw[!temp_na] <- vv$raw
+          logistic[!temp_na] <- vv$logistic
+          cloglog[!temp_na] <- vv$cloglog
+        }
+        vals <- cbind(raw=raw, logistic=logistic, cloglog=cloglog)
+        out <- writeValues(out, as.matrix(vals[,setdiff(output_format, names(vals))]), tr$row[i])
+        pbStep(pb) 
+      }
+      out <- writeStop(out)
+      pbClose(pb)
+    }
   } else {
     prediction_raw <- prediction_logistic <- prediction_cloglog <-
       rep(NA_real_, length(na))
-    prediction_raw[!na] <- raw
-    prediction_logistic[!na] <- logistic
-    prediction_cloglog[!na] <- cloglog
+    vv <- .proj(lambdas, newdata, k_other, k_hinge, k, txt, quiet)
+    prediction_raw[!na] <- vv$raw
+    prediction_logistic[!na] <- vv$logistic
+    prediction_cloglog[!na] <- vv$cloglog
     #prediction_lfx[!na] <- lfx
     out <- list(prediction_raw=prediction_raw,
                 prediction_logistic=prediction_logistic,
