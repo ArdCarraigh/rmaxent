@@ -165,6 +165,10 @@ similarity <- function (x, ref, full = FALSE, filename='', ...)
   
   else {
     out <- .mess(x, ref_numerical, rng, ref_categorical, fact)
+    out$mod <- as.factor(out$mod)
+    levels(out$mod) <- nms
+    out$mos <- as.factor(out$mos)
+    levels(out$mos) <- nms
     if (!isTRUE(full)) {
       out <- out[c('similarity_min', 'mod', 'mos')]
     }
