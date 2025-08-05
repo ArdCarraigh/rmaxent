@@ -74,10 +74,8 @@ limiting <- function(x, me, filename='', ...) {
       pbClose(pb) 
     }
   }
-  else if(methods::is(x, "data.frame")){
-    out <- .lim(x, me, nms)
-  }
-    
+  else out <- .lim(x, me, nms)
+  
   out <- as.factor(out)
   if(isTRUE(r)){
     lev <- raster::levels(out)[[1]]
