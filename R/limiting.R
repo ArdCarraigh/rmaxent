@@ -31,7 +31,6 @@
 #'   limiting(predictors, me)
 #' }
 limiting <- function(x, me, filename='', ...) {
-  out <- raster(x)
   filename <- trim(filename)
   lam <- parse_lambdas(me)$lambdas
   nms <- names(me@presence)
@@ -53,27 +52,38 @@ limiting <- function(x, me, filename='', ...) {
     limiting
   }
   
-  if(filename == ''){
-    vv <- getValues(x)
-    vv <- .lim(vv, me, nms)
-    out <- setValues(out, vv)
-  }
-  else{
-    tr <- blockSize(out)
-    pb <- pbCreate(tr$n, ...)	
-    out <- writeStart(out, filename, ...)
-    for (i in 1:tr$n) {
-      vv <- getValues(x, row=tr$row[i], nrows=tr$nrows[i])
+  r <- methods::is(x, "Raster")
+  if(isTRUE(r)){
+    out <- raster(x))
+    if(filename == ''){
+      vv <- getValues(x)
       vv <- .lim(vv, me, nms)
-      out <- writeValues(out, vv, tr$row[i])
-      pbStep(pb) 
+      out <- setValues(out, vv)
     }
-    out <- writeStop(out)
-    pbClose(pb) 
+    else{
+      tr <- blockSize(out)
+      pb <- pbCreate(tr$n, ...)	
+      out <- writeStart(out, filename, ...)
+      for (i in 1:tr$n) {
+        vv <- getValues(x, row=tr$row[i], nrows=tr$nrows[i])
+        vv <- .lim(vv, me, nms)
+        out <- writeValues(out, vv, tr$row[i])
+        pbStep(pb) 
+      }
+      out <- writeStop(out)
+      pbClose(pb) 
+    }
   }
+  else if(methods::is(x, "data.frame")){
+    out <- .lim(x, me, nms)
+  }
+    
   out <- as.factor(out)
-  lev <- raster::levels(out)[[1]]
-  lev$predictor <- nms[lev$ID]
-  levels(out) <- lev
+  if(isTRUE(r)){
+    lev <- raster::levels(out)[[1]]
+    lev$predictor <- nms[lev$ID]
+    levels(out) <- lev
+  }
+  else levels(out) <- nms
   out
 }
