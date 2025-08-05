@@ -54,7 +54,7 @@ limiting <- function(x, me, filename='', ...) {
   
   r <- methods::is(x, "Raster")
   if(isTRUE(r)){
-    out <- raster(x))
+    out <- raster(x)
     if(filename == ''){
       vv <- getValues(x)
       vv <- .lim(vv, me, nms)
